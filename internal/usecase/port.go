@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"port-processor/internal/entity"
 	"sync"
 )
@@ -36,13 +37,28 @@ func (p *PortUseCase) Process(ctx context.Context, reader io.Reader, workerCount
 
 	dec := json.NewDecoder(reader)
 	// read open bracket
-	var t json.Token
-	t, err = dec.Token()
+	_, err = dec.Token()
 	if err != nil {
 		return
 	}
-
 	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		err = p.process(dec, done, workerCount)
+		if err != nil {
+			log.Println("parse error", err.Error())
+		}
+	}()
+
+	<-done
+
+	return
+}
+
+// process reads the json and saves the port
+func (p *PortUseCase) process(dec *json.Decoder, done chan struct{}, workerCount int) (err error) {
+
 	// this buffered channel will block at the concurrency limit
 	semaphoreChan := make(chan struct{}, workerCount)
 	// make sure we close these channels when we're done with them
@@ -50,43 +66,39 @@ func (p *PortUseCase) Process(ctx context.Context, reader io.Reader, workerCount
 		close(semaphoreChan)
 	}()
 
-	go func() {
-		defer close(done)
-		// while the array contains values
-		for dec.More() {
-			// unloc of port
-			t, err = dec.Token()
-			if err != nil {
-				return
-			}
-
-			if !dec.More() {
-				continue
-			}
-
-			// limit has been reached block until there is room
-			semaphoreChan <- struct{}{}
-
-			port := pool.Get().(*entity.Port)
-			err = dec.Decode(port)
-			if err != nil {
-				return
-			}
-			// set unloc
-			port.Unloc = fmt.Sprintf("%v", t)
-
-			// parallelize db operations
-			go func(_port *entity.Port) {
-				defer func() {
-					pool.Put(_port)
-					<-semaphoreChan
-				}()
-				// TODO: add error handling
-				p.repo.Save(_port)
-			}(port)
+	for dec.More() {
+		// unloc of port
+		var t json.Token
+		t, err = dec.Token()
+		if err != nil {
+			return
 		}
-	}()
 
-	<-done
+		if !dec.More() {
+			continue
+		}
+
+		// limit has been reached block until there is room
+		semaphoreChan <- struct{}{}
+
+		port := pool.Get().(*entity.Port)
+		err = dec.Decode(port)
+		if err != nil {
+			return
+		}
+		// set unloc
+		port.Unloc = fmt.Sprintf("%v", t)
+
+		// parallelize db operations
+		go func(_port *entity.Port) {
+			defer func() {
+				pool.Put(_port)
+				<-semaphoreChan
+			}()
+			// TODO: add error handling
+			p.repo.Save(_port)
+		}(port)
+	}
+
 	return
 }
