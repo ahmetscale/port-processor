@@ -1,0 +1,33 @@
+version: '3.8'
+
+volumes:
+  postgres_data:
+    driver: local
+
+services:
+  postgres:
+    container_name: port-postgres
+    image: postgres
+    restart: "on-failure"
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: root
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  portprocessor:
+    container_name: portprocessor
+    build:
+      dockerfile: Dockerfile
+      context: .
+    depends_on:
+      - postgres
+    links:
+      - postgres
+    ports:
+      - "5050:5050"
+    environment:
+      DSN: postgresql://root:root@postgres/root?sslmode=disable
+      PORT: 5050
