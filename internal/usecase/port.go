@@ -45,7 +45,7 @@ func (p *PortUseCase) Process(ctx context.Context, reader io.Reader, workerCount
 
 	go func() {
 		defer close(done)
-		err = p.process(dec, done, workerCount)
+		err = p.process(dec, workerCount)
 		if err != nil {
 			log.Println("parse error", err.Error())
 		}
@@ -57,7 +57,7 @@ func (p *PortUseCase) Process(ctx context.Context, reader io.Reader, workerCount
 }
 
 // process reads the json and saves the port
-func (p *PortUseCase) process(dec *json.Decoder, done chan struct{}, workerCount int) (err error) {
+func (p *PortUseCase) process(dec *json.Decoder, workerCount int) (err error) {
 
 	// this buffered channel will block at the concurrency limit
 	semaphoreChan := make(chan struct{}, workerCount)
@@ -96,7 +96,10 @@ func (p *PortUseCase) process(dec *json.Decoder, done chan struct{}, workerCount
 				<-semaphoreChan
 			}()
 			// TODO: add error handling
-			p.repo.Save(_port)
+			err1 := p.repo.Save(_port)
+			if err1 != nil {
+				log.Println("save error", err1.Error())
+			}
 		}(port)
 	}
 
